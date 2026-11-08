@@ -1,0 +1,20 @@
+[package]
+name = "handshake"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[dependencies]
+solana-program = "3"
+solana-sha256-hasher = { version = "3", features = ["sha2"] }
+solana-system-interface = { version = "3", features = ["bincode"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))', 'cfg(feature, values("custom-heap", "custom-panic"))'] }
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1

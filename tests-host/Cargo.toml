@@ -1,0 +1,17 @@
+[package]
+name = "handshake-tests"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+publish = false
+
+[dev-dependencies]
+litesvm = "=0.18.2"
+sha2 = "0.10"
+solana-clock = "3"
+solana-instruction = "3"
+solana-keypair = "3"
+solana-pubkey = "3"
+solana-signer = "3"
+solana-system-interface = { version = "3", features = ["bincode"] }
+solana-transaction = "4"

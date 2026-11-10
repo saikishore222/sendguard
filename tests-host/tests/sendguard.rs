@@ -9,14 +9,29 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use std::str::FromStr;
 
-const PROGRAM_ID: &str = include_str!("../program-id.txt");
+const IDL: &str = include_str!("../../idl/sendguard.json");
 const AMOUNT: u64 = 500_000_000;
 const SECRET: [u8; 32] = [7; 32];
 const HOLD: i64 = 60;
 const NONCE: u64 = 1;
 
-fn discriminator(namespace: &str, name: &str) -> Vec<u8> {
-    Sha256::digest(format!("{namespace}:{name}"))[..8].to_vec()
+fn idl() -> serde_json::Value {
+    serde_json::from_str(IDL).unwrap()
+}
+
+fn discriminator(kind: &str, name: &str) -> Vec<u8> {
+    let list = if kind == "account" { "accounts" } else { "instructions" };
+    idl()[list]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["name"] == name)
+        .unwrap_or_else(|| panic!("{name} is not in the IDL"))["discriminator"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|byte| byte.as_u64().unwrap() as u8)
+        .collect()
 }
 
 struct Lab {
@@ -30,7 +45,7 @@ struct Lab {
 
 fn lab() -> Lab {
     let mut svm = LiteSVM::new().with_transaction_history(0);
-    let program = Pubkey::from_str(PROGRAM_ID.trim()).unwrap();
+    let program = Pubkey::from_str(idl()["address"].as_str().unwrap()).unwrap();
     let elf = std::fs::read(concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../target/deploy/sendguard.so"

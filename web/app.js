@@ -1,14 +1,17 @@
 const { Connection, Keypair, PublicKey, SystemProgram, Transaction, TransactionInstruction, LAMPORTS_PER_SOL } = solanaWeb3;
-const cfg = window.HANDSHAKE_CONFIG;
+const cfg = window.SENDGUARD_CONFIG;
+const idl = window.SENDGUARD_IDL;
 const connection = new Connection(cfg.rpc, "confirmed");
-const programId = new PublicKey(cfg.programId);
+const programId = new PublicKey(idl.address);
 
+const instruction = name => Uint8Array.from(idl.instructions.find(i => i.name === name).discriminator);
 const DISCRIMINATOR = {
-  send: Uint8Array.of(102, 251, 20, 187, 65, 75, 12, 69),
-  claim: Uint8Array.of(62, 198, 214, 193, 213, 159, 108, 210),
-  reclaim: Uint8Array.of(44, 177, 236, 249, 145, 109, 163, 186),
-  payment: Uint8Array.of(227, 231, 51, 26, 244, 88, 4, 148),
+  send: instruction("send"),
+  claim: instruction("claim"),
+  reclaim: instruction("reclaim"),
+  payment: Uint8Array.from(idl.accounts.find(a => a.name === "Payment").discriminator),
 };
+const ERRORS = new Map(idl.errors.map(e => [e.code, e.msg]));
 
 const DEMO_AMOUNT = 0.01;
 const DEMO_HOLD = 40;
@@ -41,10 +44,10 @@ function write(key, value) {
 }
 
 function loadYou() {
-  const saved = read("handshake-you", null);
+  const saved = read("sendguard-you", null);
   if (saved) return keypair(saved);
   const created = Keypair.generate();
-  write("handshake-you", Array.from(created.secretKey));
+  write("sendguard-you", Array.from(created.secretKey));
   return created;
 }
 
@@ -156,8 +159,11 @@ async function readLogs(signature) {
 }
 
 const reasonFrom = logs => {
-  const line = logs.find(l => l.includes("Error Message: "));
-  return line ? line.split("Error Message: ")[1].replace(/\.$/, "") : "";
+  for (const line of logs) {
+    const match = line.match(/Error Number: (\d+)/) || line.match(/custom program error: (0x[0-9a-f]+)/);
+    if (match && ERRORS.has(Number(match[1]))) return ERRORS.get(Number(match[1]));
+  }
+  return "";
 };
 
 function concat(...parts) {
@@ -468,7 +474,10 @@ function reclaim(p, signer, who, label) {
     p.status = "refunded";
     forgetOpen(p);
     logTx(who, label(p), result.signature);
-    if (p.recipient.equals(scammer.publicKey)) demo.done.refund = true;
+    if (p.recipient.equals(scammer.publicKey)) {
+      demo.done.scamClaim = true;
+      demo.done.refund = true;
+    }
   });
 }
 
@@ -642,8 +651,8 @@ async function connectWallet() {
 const HOLDS = [["10 minutes", 600], ["1 hour", 3600], ["24 hours", 86400]];
 const app = { wallet: null, balance: 0, result: null };
 
-const verifiedContacts = () => read("handshake-verified", []);
-const sentPayments = () => read("handshake-sent", []);
+const verifiedContacts = () => read("sendguard-verified", []);
+const sentPayments = () => read("sendguard-sent", []);
 
 async function syncSent() {
   const sent = sentPayments();
@@ -660,8 +669,8 @@ async function syncSent() {
     const tx = await connection.getTransaction(latest.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
     if (tx && (tx.meta.logMessages || []).some(line => line.includes("Instruction: Claim"))) verified.add(item.recipient);
   }
-  write("handshake-sent", open);
-  write("handshake-verified", [...verified]);
+  write("sendguard-sent", open);
+  write("sendguard-verified", [...verified]);
 }
 
 async function renderRealApp() {
@@ -734,7 +743,7 @@ async function renderRealApp() {
       } else {
         const held = await hold(app.wallet, key, lamports, Number(duration.value));
         const link = claimLink(held);
-        write("handshake-sent", [...sentPayments(), { payment: held.payment.toString(), sender: app.wallet.publicKey.toString(), recipient: key.toString(), lamports, link }]);
+        write("sendguard-sent", [...sentPayments(), { payment: held.payment.toString(), sender: app.wallet.publicKey.toString(), recipient: key.toString(), lamports, link }]);
         app.result = { kind: "held", signature: held.signature, link, lamports };
       }
       await renderRealApp();
@@ -773,7 +782,7 @@ function pendingRow(item) {
       const result = await submit([reclaimIx(app.wallet.publicKey, payment, app.wallet.publicKey)], app.wallet);
       if (!result.ok) throw new Error(reasonFrom(result.logs) || "The cancel failed.");
       app.result = { kind: "cancelled", signature: result.signature, lamports: item.lamports };
-      write("handshake-sent", sentPayments().filter(p => p.payment !== item.payment));
+      write("sendguard-sent", sentPayments().filter(p => p.payment !== item.payment));
       await renderRealApp();
     } catch (e) {
       error.textContent = friendlyError(e);
@@ -871,6 +880,59 @@ async function renderClaimPage(paymentText, secretText) {
   fill(body, ...details, !expired && el("div", { class: "actions" }, walletButton, demoButton), !expired && el("p", { class: "note" }, "Your wallet signs the claim. The demo pays the devnet fee, so a new wallet can claim too."), error);
 }
 
+const API = cfg.api || (["localhost", "127.0.0.1"].includes(location.hostname) ? "http://localhost:8787" : "");
+
+function renderChecker() {
+  if (!API) return;
+  $("checker").hidden = false;
+  const input = el("input", { class: "addr-input", placeholder: "Solana address", autocomplete: "off", spellcheck: "false" });
+  const button = el("button", { class: "btn" }, "Check");
+  const out = el("div");
+  const day = t => t ? new Date(t * 1000).toLocaleDateString() : "unknown";
+  const link = (report, kind, value, text) => el("a", { href: `https://explorer.solana.com/${kind}/${value}${report.cluster === "mainnet-beta" ? "" : `?cluster=${report.cluster}`}`, target: "_blank", rel: "noopener" }, text);
+
+  const show = report => {
+    const summary = el("p", { class: "note" }, `Checked the last ${report.scanned} successful transactions (${day(report.oldest)} to ${day(report.newest)}). This wallet paid ${report.addresses_you_paid} addresses in them.`);
+    if (!report.findings.length) {
+      fill(out, el("div", { class: "good-box" }, el("strong", null, "No lookalike addresses found. "), "That only covers the transactions checked, not the wallet's whole history."), summary);
+      return;
+    }
+    const paid = report.findings.filter(f => f.you_paid_it).length;
+    fill(out,
+      el("div", { class: "alert" }, el("strong", null, `${report.findings.length} lookalike ${report.findings.length === 1 ? "address" : "addresses"} found. `),
+        paid ? `This wallet sent funds to ${paid} of them.` : "This wallet hasn't paid any of them in the transactions checked."),
+      report.findings.map(f => el("div", { class: "card" + (f.you_paid_it ? " bad" : "") },
+        f.you_paid_it && el("strong", null, "This wallet paid the lookalike"),
+        el("div", { class: "compare-addr" }, el("span", null, "Paid"), f.imitates),
+        el("div", { class: "compare-addr" }, el("span", null, "Fake"), highlightDifferences(f.lookalike, f.imitates)),
+        el("div", { class: "note", style: "margin-top:4px" },
+          `Same first ${f.matching_start} and last ${f.matching_end} characters. Seen ${f.times_seen} ${f.times_seen === 1 ? "time" : "times"}, last on ${day(f.last_seen)}. `,
+          link(report, "tx", f.example_signature, "View transaction ↗")))),
+      summary);
+  };
+
+  const run = async () => {
+    const address = input.value.trim();
+    if (!parseKey(address)) { fill(out, el("div", { class: "error" }, "Enter a valid Solana address.")); return; }
+    button.disabled = true;
+    button.textContent = "Checking…";
+    fill(out, el("p", { class: "note" }, "Reading recent transactions. This can take up to a minute."));
+    try {
+      const response = await fetch(`${API}/api/check/${address}`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "The check failed.");
+      show(body);
+    } catch (error) {
+      fill(out, el("div", { class: "error" }, friendlyError(error)));
+    }
+    button.disabled = false;
+    button.textContent = "Check";
+  };
+  button.onclick = run;
+  input.onkeydown = event => { if (event.key === "Enter") run(); };
+  fill($("checkerApp"), el("label", { class: "field", style: "margin-top:0" }, el("span", null, "Wallet address"), input), el("div", { class: "actions" }, button), out);
+}
+
 function start() {
   const params = new URLSearchParams(location.hash.slice(1));
   if (params.get("claim") && params.get("s")) {
@@ -879,11 +941,12 @@ function start() {
     });
     return;
   }
-  $("programLink").href = explorer("address", cfg.programId);
+  $("programLink").href = explorer("address", idl.address);
   fill($("twins"),
     el("small", null, "These are two different addresses. Wallets usually show only the ends, 8E1W…mtna, so they look identical."),
     el("div", null, friend.publicKey.toString()),
     el("div", null, highlightDifferences(scammer.publicKey, friend.publicKey)));
+  renderChecker();
   render();
   setInterval(tick, 1000);
   renderRealApp();

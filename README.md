@@ -50,6 +50,14 @@ cd tests-host && cargo test
 
 The 15 tests run the compiled Anchor program on LiteSVM. They cover the claim, wrong secret, stolen secret, expired hold, cancel, permissionless refund, wrong sender, double payout, prefunded payment address, reused nonce, bad inputs and forged payment accounts.
 
+## IDL
+
+The IDL is in `idl/sendguard.json` and published on devnet. The site and the tests read instruction and error codes from it. After changing the program, regenerate it with Anchor CLI 1.2.2:
+
+```bash
+make idl
+```
+
 ## Limits
 
 - **Devnet prototype.** It hasn't been audited, and it shouldn't hold real money.
@@ -78,5 +86,6 @@ The version submitted to the hackathon was a native Solana program, still on dev
 ```
 programs/     The Anchor program
 tests-host/   LiteSVM tests against the compiled program
+idl/          The program IDL
 web/          The demo page
 ```

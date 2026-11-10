@@ -149,6 +149,12 @@ footer { margin-top: 32px; padding: 16px 0 40px; border-top: 1px solid var(--lin
     <div class="twins" id="twins"></div>
   </header>
 
+  <section class="block" id="checker" hidden style="margin-top:0;margin-bottom:28px">
+    <div class="section-head"><h2>Is your wallet being targeted?</h2></div>
+    <p class="note" style="margin:-6px 0 10px">Paste any Solana address. This reads its recent public history and looks for addresses that imitate ones it has paid. It never asks you to connect or sign.</p>
+    <div class="form" id="checkerApp" style="max-width:none"></div>
+  </section>
+
   <section>
     <div class="section-head">
       <h2>Try it: three wallets on devnet</h2>
@@ -192,6 +198,7 @@ footer { margin-top: 32px; padding: 16px 0 40px; border-top: 1px solid var(--lin
   <footer>SendGuard runs on Solana devnet with free test SOL.</footer>
 </div>
 <script src="vendor.js"></script>
+<script src="idl.js"></script>
 <script src="demo-config.js"></script>
 <script src="app.js"></script>
 </body>

@@ -3,6 +3,13 @@ const cfg = window.HANDSHAKE_CONFIG;
 const connection = new Connection(cfg.rpc, "confirmed");
 const programId = new PublicKey(cfg.programId);
 
+const DISCRIMINATOR = {
+  send: Uint8Array.of(102, 251, 20, 187, 65, 75, 12, 69),
+  claim: Uint8Array.of(62, 198, 214, 193, 213, 159, 108, 210),
+  reclaim: Uint8Array.of(44, 177, 236, 249, 145, 109, 163, 186),
+  payment: Uint8Array.of(227, 231, 51, 26, 244, 88, 4, 148),
+};
+
 const DEMO_AMOUNT = 0.01;
 const DEMO_HOLD = 40;
 const HISTORY_AMOUNT = 0.001 * LAMPORTS_PER_SOL;
@@ -148,7 +155,10 @@ async function readLogs(signature) {
   return [];
 }
 
-const reasonFrom = logs => logs.filter(l => l.includes("handshake:")).map(l => l.replace("Program log: handshake: ", "")).join(" ");
+const reasonFrom = logs => {
+  const line = logs.find(l => l.includes("Error Message: "));
+  return line ? line.split("Error Message: ")[1].replace(/\.$/, "") : "";
+};
 
 function concat(...parts) {
   const out = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
@@ -170,7 +180,7 @@ async function hold(signer, recipient, lamports, seconds) {
   const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", secret));
   const result = await submit([new TransactionInstruction({
     programId,
-    data: concat(Uint8Array.of(0), nonce, le64(lamports), le64(seconds), hash),
+    data: concat(DISCRIMINATOR.send, nonce, le64(lamports), le64(seconds), hash),
     keys: [
       { pubkey: signer.publicKey, isSigner: true, isWritable: true },
       { pubkey: payment, isSigner: false, isWritable: true },
@@ -190,18 +200,19 @@ async function hold(signer, recipient, lamports, seconds) {
 async function readPayment(payment) {
   const account = await connection.getAccountInfo(payment, "confirmed");
   if (!account || !account.owner.equals(programId)) return null;
+  if (!DISCRIMINATOR.payment.every((byte, i) => account.data[i] === byte)) return null;
   const view = new DataView(account.data.buffer, account.data.byteOffset);
   return {
-    sender: new PublicKey(account.data.subarray(1, 33)),
-    recipient: new PublicKey(account.data.subarray(33, 65)),
-    lamports: Number(view.getBigUint64(97, true)),
-    deadline: Number(view.getBigInt64(105, true)),
+    sender: new PublicKey(account.data.subarray(8, 40)),
+    recipient: new PublicKey(account.data.subarray(40, 72)),
+    lamports: Number(view.getBigUint64(104, true)),
+    deadline: Number(view.getBigInt64(112, true)),
   };
 }
 
 const claimIx = (claimant, payment, sender, secret) => new TransactionInstruction({
   programId,
-  data: concat(Uint8Array.of(1), secret),
+  data: concat(DISCRIMINATOR.claim, secret),
   keys: [
     { pubkey: claimant, isSigner: true, isWritable: true },
     { pubkey: payment, isSigner: false, isWritable: true },
@@ -211,9 +222,9 @@ const claimIx = (claimant, payment, sender, secret) => new TransactionInstructio
 
 const reclaimIx = (caller, payment, sender) => new TransactionInstruction({
   programId,
-  data: Uint8Array.of(2),
+  data: DISCRIMINATOR.reclaim,
   keys: [
-    { pubkey: caller, isSigner: true, isWritable: true },
+    { pubkey: caller, isSigner: true, isWritable: false },
     { pubkey: payment, isSigner: false, isWritable: true },
     { pubkey: sender, isSigner: false, isWritable: true },
   ],
@@ -647,7 +658,7 @@ async function syncSent() {
     const [latest] = await connection.getSignaturesForAddress(new PublicKey(item.payment), { limit: 1 });
     if (!latest) continue;
     const tx = await connection.getTransaction(latest.signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
-    if (tx && (tx.meta.logMessages || []).some(line => line.includes("handshake: claimed"))) verified.add(item.recipient);
+    if (tx && (tx.meta.logMessages || []).some(line => line.includes("Instruction: Claim"))) verified.add(item.recipient);
   }
   write("handshake-sent", open);
   write("handshake-verified", [...verified]);

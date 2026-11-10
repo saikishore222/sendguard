@@ -4,7 +4,7 @@ Crypto's test transfer, done right. Verify once, then send without fear.
 
 Scammers plant lookalike addresses in your wallet history, hoping you copy one. On Solana, as on most chains, a payment to the wrong address is final. SendGuard holds a first payment until the recipient proves they have a secret you shared with them. If nobody can, the money goes back to you.
 
-Live on Solana devnet: [`5BtMWAqt4fRJM21kXepCRayNwRp3Nz8ic2nMeshLjEgN`](https://explorer.solana.com/address/5BtMWAqt4fRJM21kXepCRayNwRp3Nz8ic2nMeshLjEgN?cluster=devnet)
+Live on Solana devnet: [`HVPxF8vnBJXjy7eeX34BzMvAKMFxUdPDuZLHUFTUvPfu`](https://explorer.solana.com/address/HVPxF8vnBJXjy7eeX34BzMvAKMFxUdPDuZLHUFTUvPfu?cluster=devnet)
 
 ## How it works
 
@@ -41,14 +41,14 @@ The "Try it yourself" section connects Phantom, Solflare or Backpack on devnet, 
 ## Run the tests
 
 ```bash
-cd program && cargo-build-sbf --tools-version v1.52
+cargo-build-sbf --tools-version v1.52
 ```
 
 ```bash
 cd tests-host && cargo test
 ```
 
-The 9 tests run the compiled program on LiteSVM and cover the claim, wrong secret, stolen secret, expired hold, cancel, permissionless refund, wrong sender and double-payout cases.
+The 15 tests run the compiled Anchor program on LiteSVM. They cover the claim, wrong secret, stolen secret, expired hold, cancel, permissionless refund, wrong sender, double payout, prefunded payment address, reused nonce, bad inputs and forged payment accounts.
 
 ## Limits
 
@@ -69,14 +69,14 @@ The 9 tests run the compiled program on LiteSVM and cover the claim, wrong secre
 - Guardian: a trusted person can cancel a large transfer during the hold
 - Timed holds for exchange deposit addresses
 
-## Naming
+## History
 
-The deployed program and its code still use the working name `handshake`, so on-chain logs read like `handshake: wrong secret`.
+The version submitted to the hackathon was a native Solana program, still on devnet at `5BtMWAqt4fRJM21kXepCRayNwRp3Nz8ic2nMeshLjEgN`. Its code is in the first commit, and its on-chain logs use the working name `handshake`. The live site now uses this Anchor version.
 
 ## Layout
 
 ```
-program/      The Solana program
+programs/     The Anchor program
 tests-host/   LiteSVM tests against the compiled program
 web/          The demo page
 ```

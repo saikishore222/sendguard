@@ -1,0 +1,9 @@
+[toolchain]
+package_manager = "npm"
+
+[programs.devnet]
+sendguard = "HVPxF8vnBJXjy7eeX34BzMvAKMFxUdPDuZLHUFTUvPfu"
+
+[provider]
+cluster = "devnet"
+wallet = ".keys/deployer.json"

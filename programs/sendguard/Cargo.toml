@@ -1,0 +1,26 @@
+[package]
+name = "sendguard"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.89"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build"]
+anchor-debug = []
+custom-heap = []
+custom-panic = []
+
+[dependencies]
+anchor-lang = "1.2.2"
+solana-sha256-hasher = { version = "3", features = ["sha2"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(target_os, values("solana"))'] }

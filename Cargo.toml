@@ -1,0 +1,9 @@
+[workspace]
+members = ["programs/sendguard"]
+exclude = ["tests-host"]
+resolver = "3"
+
+[profile.release]
+overflow-checks = true
+lto = "fat"
+codegen-units = 1

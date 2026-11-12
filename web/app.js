@@ -18,7 +18,7 @@ const DEMO_HOLD = 40;
 const HISTORY_AMOUNT = 0.001 * LAMPORTS_PER_SOL;
 const MIN_AMOUNT = 0.002;
 const FEE_FLOOR = 0.002 * LAMPORTS_PER_SOL;
-const YOU_MINIMUM = 0.03 * LAMPORTS_PER_SOL;
+const YOU_MINIMUM = 0.04 * LAMPORTS_PER_SOL;
 const YOU_TOP_UP = 0.05 * LAMPORTS_PER_SOL;
 const GAS_TOP_UP = 0.005 * LAMPORTS_PER_SOL;
 const RECYCLE_ABOVE = 0.04 * LAMPORTS_PER_SOL;
@@ -76,6 +76,30 @@ const looksAlike = (a, b) => {
   const [x, y] = [a.toString(), b.toString()];
   return x !== y && x.slice(0, 4) === y.slice(0, 4) && x.slice(-4) === y.slice(-4);
 };
+
+function dot(key) {
+  let hash = 0;
+  for (const ch of key.toString()) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return el("span", { class: "dot", style: `background:hsl(${hash % 360} 65% 50%)`, "aria-hidden": "true" });
+}
+
+function copyButton(text, label) {
+  const button = el("button", { class: "copy", title: "Copy address", onclick: async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = "Copied";
+    } catch {
+      button.textContent = text;
+    }
+    setTimeout(() => { button.textContent = label; }, 1500);
+  } }, label);
+  return button;
+}
+
+function duration(seconds) {
+  const [h, m, s] = [Math.floor(seconds / 3600), Math.floor(seconds / 60) % 60, seconds % 60];
+  return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+}
 
 function highlightDifferences(address, other) {
   const [text, against] = [address.toString(), other.toString()];
@@ -249,7 +273,8 @@ function friendlyError(error) {
 }
 
 const TASKS = [
-  ["lookalike", "Pay the address that sent you 0.000001 SOL. It's the lookalike."],
+  ["lost", "With SendGuard off, pay the address that sent you 0.000001 SOL. It's the lookalike."],
+  ["lookalike", "Make the same mistake again, this time with SendGuard on."],
   ["scamClaim", "In the Scammer wallet, try to claim it."],
   ["refund", "Wait for the hold to end, or cancel it. Your money comes back."],
   ["friendHold", "Pay the address you sent 0.001 SOL to. That's your friend."],
@@ -262,10 +287,14 @@ const demo = {
   starting: false,
   startError: "",
   balances: {},
+  deltas: {},
+  setup: 0,
   history: [],
   payments: [],
   txs: [],
   verified: false,
+  guard: false,
+  lost: [],
   done: {},
   busy: {},
   errors: {},
@@ -277,6 +306,7 @@ const toInput = el("input", { class: "addr-input", placeholder: "Paste or use an
 const amountInput = el("input", { type: "number", min: String(MIN_AMOUNT), step: "0.001", value: String(DEMO_AMOUNT), inputmode: "decimal" });
 const sendStatus = el("div");
 toInput.oninput = updateSendStatus;
+toInput.onkeydown = amountInput.onkeydown = event => { if (event.key === "Enter" && !demo.sending) send(); };
 
 function parseKey(text) {
   try { return new PublicKey(text.trim()); } catch { return null; }
@@ -285,7 +315,7 @@ function parseKey(text) {
 function updateSendStatus() {
   const key = parseKey(toInput.value);
   sendStatus.replaceChildren();
-  if (key && looksAlike(key, friend.publicKey)) {
+  if (demo.guard && key && looksAlike(key, friend.publicKey)) {
     sendStatus.append(el("div", { class: "alert" },
       el("strong", null, "This isn't the address you paid before."),
       el("div", { class: "compare-addr" }, el("span", null, "Paid"), friend.publicKey.toString()),
@@ -300,13 +330,13 @@ const sendButtonSlot = el("div", { class: "actions" });
 
 function renderSendButton() {
   const key = parseKey(toInput.value);
-  const direct = key && key.equals(friend.publicKey) && demo.verified;
+  const direct = !demo.guard || (key && key.equals(friend.publicKey) && demo.verified);
   const next = nextTask();
-  const hinted = !demo.sending && ["lookalike", "friendHold", "direct"].includes(next);
+  const hinted = !demo.sending && ["lost", "lookalike", "friendHold", "direct"].includes(next);
   sendButtonSlot.replaceChildren(
     el("button", { class: `btn${hinted && key ? " next" : ""}`, disabled: demo.sending, onclick: send },
       demo.sending ? "Sending…" : direct ? "Send" : "Send with hold"),
-    el("span", { class: "note", style: "margin:0" }, direct ? "No hold for verified addresses" : `Hold: ${DEMO_HOLD} seconds`));
+    el("span", { class: "note", style: "margin:0" }, !demo.guard ? "Arrives straight away" : direct ? "No hold for verified addresses" : `Hold: ${DEMO_HOLD} seconds`));
 }
 
 function nextTask() {
@@ -315,13 +345,18 @@ function nextTask() {
 }
 
 function logTx(who, what, signature, ok = true) {
-  demo.txs.unshift({ who, what, signature, ok, at: new Date().toLocaleTimeString() });
+  demo.txs.unshift({ who, what, signature, ok, at: new Date().toLocaleTimeString(), added: Date.now() });
 }
 
 async function refreshBalances() {
   try {
     const [a, b, c] = await Promise.all([you, friend, scammer].map(k => connection.getBalance(k.publicKey, "confirmed")));
-    demo.balances = { you: a, friend: b, scammer: c };
+    const fresh = { you: a, friend: b, scammer: c };
+    for (const [id, lamports] of Object.entries(fresh)) {
+      const before = demo.balances[id];
+      if (before !== undefined && before !== lamports) demo.deltas[id] = { lamports: lamports - before, at: Date.now() };
+    }
+    demo.balances = fresh;
   } catch {}
   render();
 }
@@ -341,11 +376,13 @@ async function recoverOldHolds() {
 async function startDemo() {
   demo.starting = true;
   demo.startError = "";
+  demo.setup = 0;
   render();
   try {
     const balances = await Promise.all([you, friend, scammer].map(k => connection.getBalance(k.publicKey, "confirmed")));
-    if (balances[1] > RECYCLE_ABOVE) {
-      await submit([SystemProgram.transfer({ fromPubkey: friend.publicKey, toPubkey: funder.publicKey, lamports: balances[1] - RECYCLE_KEEP })], localSigner(friend));
+    for (const [key, balance] of [[friend, balances[1]], [scammer, balances[2]]]) {
+      if (balance <= RECYCLE_ABOVE) continue;
+      await submit([SystemProgram.transfer({ fromPubkey: key.publicKey, toPubkey: funder.publicKey, lamports: balance - RECYCLE_KEEP })], localSigner(key));
     }
     const topUps = [];
     if (balances[0] < YOU_MINIMUM) topUps.push([you, YOU_TOP_UP]);
@@ -357,9 +394,13 @@ async function startDemo() {
       logTx("Demo", "Funded the demo wallets", funded.signature);
     }
     await recoverOldHolds();
+    demo.setup = 1;
+    render();
     const paid = await submit([SystemProgram.transfer({ fromPubkey: you.publicKey, toPubkey: friend.publicKey, lamports: HISTORY_AMOUNT })], localSigner(you));
     if (!paid.ok) throw new Error("Couldn't set up your wallet history.");
     logTx("You", "Paid your friend 0.001 SOL earlier", paid.signature);
+    demo.setup = 2;
+    render();
     const dust = await submit([SystemProgram.transfer({ fromPubkey: scammer.publicKey, toPubkey: you.publicKey, lamports: 1000 })], localSigner(scammer));
     if (!dust.ok) throw new Error("Couldn't set up your wallet history.");
     logTx("Scammer", "Sent you 0.000001 SOL from the lookalike", dust.signature);
@@ -391,7 +432,18 @@ async function send() {
   demo.sending = true;
   render();
   try {
-    if (key.equals(friend.publicKey) && demo.verified) {
+    if (!demo.guard) {
+      const result = await submit([SystemProgram.transfer({ fromPubkey: you.publicKey, toPubkey: key, lamports })], localSigner(you));
+      if (!result.ok) throw new Error("The payment failed.");
+      if (key.equals(scammer.publicKey)) {
+        demo.lost.unshift({ lamports, signature: result.signature });
+        logTx("You", `Sent ${sol(lamports)} SOL to the lookalike with a normal transfer. It can't be undone`, result.signature);
+        demo.done.lost = true;
+        demo.guard = true;
+      } else {
+        logTx("You", `Sent ${sol(lamports)} SOL to ${key.equals(friend.publicKey) ? "your friend" : short(key)} with a normal transfer`, result.signature);
+      }
+    } else if (key.equals(friend.publicKey) && demo.verified) {
       const result = await submit([SystemProgram.transfer({ fromPubkey: you.publicKey, toPubkey: key, lamports })], localSigner(you));
       if (!result.ok) throw new Error("The payment failed.");
       logTx("You", `Sent ${sol(lamports)} SOL straight to your friend`, result.signature);
@@ -499,12 +551,19 @@ function tick() {
 }
 
 function walletHead(name, key) {
-  return el("div", { class: "w-head" }, el("b", null, name),
-    el("a", { href: explorer("address", key.publicKey.toString()), target: "_blank", rel: "noopener", title: key.publicKey.toString() }, short(key.publicKey)));
+  const address = key.publicKey.toString();
+  return el("div", { class: "w-head" }, el("b", null, dot(address), name),
+    el("span", { class: "w-links" },
+      copyButton(address, short(address)),
+      el("a", { href: explorer("address", address), target: "_blank", rel: "noopener", "aria-label": `${name} on Explorer` }, "↗")));
 }
 
-function balanceRow(lamports) {
-  return el("div", { class: "w-bal" }, lamports === undefined ? "…" : sol(lamports), " ", el("small", null, "SOL"));
+function balanceRow(id) {
+  const lamports = demo.balances[id];
+  const delta = demo.deltas[id];
+  const recent = delta && Date.now() - delta.at < 4000 && Math.abs(delta.lamports) >= 50000;
+  return el("div", { class: "w-bal" }, lamports === undefined ? "…" : sol(lamports), " ", el("small", null, "SOL"),
+    recent && el("span", { class: `delta ${delta.lamports > 0 ? "up" : "down"}` }, `${delta.lamports > 0 ? "+" : "−"}${sol(Math.abs(delta.lamports))}`));
 }
 
 function renderYou() {
@@ -512,10 +571,14 @@ function renderYou() {
   const done = demo.payments.filter(p => p.status !== "held");
   return el("div", { class: "wallet" },
     walletHead("You", you),
-    balanceRow(demo.balances.you),
+    balanceRow("you"),
     el("div", { class: "w-sec" },
       el("div", { class: "w-title" }, "Send"),
-      el("label", { class: "field", style: "margin-top:0" }, el("span", null, "To"), toInput),
+      el("div", { class: "seg", role: "group", "aria-label": "SendGuard" },
+        el("span", null, "SendGuard"),
+        [["Off", false], ["On", true]].map(([label, value]) =>
+          el("button", { "aria-pressed": String(demo.guard === value), disabled: demo.sending, onclick: () => { demo.guard = value; updateSendStatus(); render(); } }, label))),
+      el("label", { class: "field" }, el("span", null, "To"), toInput),
       sendStatus,
       el("label", { class: "field" }, el("span", null, "Amount (SOL)"), amountInput),
       sendButtonSlot,
@@ -523,7 +586,7 @@ function renderYou() {
     held.length > 0 && el("div", { class: "w-sec" },
       el("div", { class: "w-title" }, "On hold"),
       held.map(p => el("div", { class: "card hold" },
-        el("strong", null, `${sol(p.lamports)} SOL for ${short(p.recipient)}`),
+        el("strong", null, `${sol(p.lamports)} SOL for `, dot(p.recipient), short(p.recipient)),
         el("span", { class: "timer", "data-timer": p.signature }),
         el("div", { class: "bar" }, el("i", { "data-bar": p.signature })),
         el("div", null, "Secret link sent to your friend."),
@@ -532,10 +595,14 @@ function renderYou() {
         demo.errors[`reclaim-${p.signature}`] && el("div", { class: "error" }, demo.errors[`reclaim-${p.signature}`])))),
     el("div", { class: "w-sec" },
       el("div", { class: "w-title" }, "Activity"),
+      demo.lost.map(l => el("div", { class: "card bad" },
+        el("strong", null, `Lost: ${sol(l.lamports)} SOL`),
+        `It went to ${short(scammer.publicKey)}, not your friend. `,
+        el("a", { href: explorer("tx", l.signature), target: "_blank", rel: "noopener" }, "View ↗"))),
       done.map(p => el("div", { class: `card ${p.status === "claimed" ? "good" : ""}` },
         p.status === "claimed" ? `Claimed: ${sol(p.lamports)} SOL went to ${short(p.recipient)}` : `Returned: ${sol(p.lamports)} SOL didn't go to ${short(p.recipient)}`)),
       demo.history.map(row => el("div", { class: "item" },
-        el("div", null, row.label, " ", row.from, " ", el("span", { class: "mono" }, short(row.key)), el("small", null, row.when, " · ", el("a", { href: explorer("tx", row.signature), target: "_blank", rel: "noopener" }, "View ↗"))),
+        el("div", null, row.label, " ", row.from, " ", dot(row.key), el("span", { class: "mono" }, short(row.key)), el("small", null, row.when, " · ", el("a", { href: explorer("tx", row.signature), target: "_blank", rel: "noopener" }, "View ↗"))),
         el("button", { class: "btn quiet small", onclick: () => { toInput.value = row.key.toString(); updateSendStatus(); } }, "Use")))));
 }
 
@@ -545,7 +612,7 @@ function renderFriend() {
   const hinted = nextTask() === "friendClaim";
   return el("div", { class: "wallet" },
     walletHead("Friend", friend),
-    balanceRow(demo.balances.friend),
+    balanceRow("friend"),
     el("div", { class: "w-sec" },
       el("div", { class: "w-title" }, "Messages from you"),
       open.length === 0 && claimed.length === 0 && el("div", { class: "empty" }, "No messages yet."),
@@ -567,10 +634,13 @@ function renderScammer() {
   const hinted = nextTask() === "scamClaim";
   return el("div", { class: "wallet" },
     walletHead("Scammer", scammer),
-    balanceRow(demo.balances.scammer),
+    balanceRow("scammer"),
     el("div", { class: "w-sec" },
       el("div", { class: "w-title" }, "Payments to this address"),
-      incoming.length === 0 && el("div", { class: "empty" }, "Nothing yet. In a normal wallet, a mistaken payment would arrive here instantly."),
+      incoming.length === 0 && demo.lost.length === 0 && el("div", { class: "empty" }, "Nothing yet."),
+      demo.lost.map(l => el("div", { class: "card" },
+        el("strong", null, `Received ${sol(l.lamports)} SOL`),
+        "A normal transfer, sent by mistake. It's theirs now.")),
       incoming.map(p => {
         const id = `scam-${p.signature}`;
         return el("div", { class: `card ${p.status === "held" ? "hold" : ""}` },
@@ -587,8 +657,10 @@ function renderScammer() {
 function renderGuide() {
   const next = TASKS.find(([id]) => !demo.done[id]);
   const count = TASKS.filter(([id]) => demo.done[id]).length;
-  const text = !demo.started ? "Set up the demo to get started." : next ? next[1] : "That's everything. You can keep sending, or reload to start over.";
-  $("guide").replaceChildren(el("b", null, demo.started && next ? `Next: ${text}` : text), el("span", null, `${count} of ${TASKS.length} done`));
+  const text = !demo.started ? "Set up the demo to get started." : next ? `Next: ${next[1]}` : "That's everything.";
+  fill($("guide"),
+    el("b", null, text, demo.started && !next && el("button", { class: "btn quiet small", onclick: () => location.reload() }, "Start over")),
+    el("span", null, `${count} of ${TASKS.length} done`));
 }
 
 function renderTxs() {
@@ -597,7 +669,7 @@ function renderTxs() {
   if (box.hidden) return;
   box.replaceChildren(el("table", null,
     el("thead", null, el("tr", null, ["Time", "Wallet", "What happened", "Result", "Transaction"].map(h => el("th", null, h)))),
-    el("tbody", null, demo.txs.map(tx => el("tr", null,
+    el("tbody", null, demo.txs.map(tx => el("tr", { class: Date.now() - tx.added < 2500 ? "new" : "" },
       el("td", { style: "white-space:nowrap" }, tx.at),
       el("td", null, tx.who),
       el("td", null, tx.what),
@@ -605,14 +677,22 @@ function renderTxs() {
       el("td", { class: "sig" }, el("a", { href: explorer("tx", tx.signature), target: "_blank", rel: "noopener" }, `${tx.signature.slice(0, 10)}… ↗`)))))));
 }
 
+const SETUP = [
+  "Funding three test wallets",
+  "Paying your friend once, so they're in your history",
+  "Scammer sends you dust from the lookalike address",
+];
+
 function renderStart() {
   const box = $("startBox");
   $("wallets").hidden = !demo.started;
   if (demo.started) { box.replaceChildren(); return; }
   fill(box,
-    el("div", { class: "form", style: "max-width:none" },
-      el("p", { style: "margin-bottom:8px" }, "This creates a wallet for you with test SOL and adds both addresses to its history."),
-      el("button", { class: "btn next", disabled: demo.starting, onclick: startDemo }, demo.starting ? "Setting up, about 15 seconds…" : "Set up the demo"),
+    el("div", { class: "form", style: "max-width:720px" },
+      el("p", { style: "margin-bottom:8px" }, "This creates a wallet for you with test SOL and adds both addresses to its history. It takes about 15 seconds."),
+      el("button", { class: "btn next", disabled: demo.starting, onclick: startDemo }, demo.starting ? "Setting up…" : "Set up the demo"),
+      demo.starting && el("ol", { class: "steps" }, SETUP.map((label, i) =>
+        el("li", { class: i < demo.setup ? "done" : i === demo.setup ? "now" : "" }, el("i", null, i < demo.setup ? "✓" : ""), label))),
       demo.startError && el("div", { class: "error", role: "alert" }, demo.startError)));
 }
 
@@ -627,17 +707,16 @@ function render() {
   }
 }
 
-function findWallet() {
+function installedWallets() {
   return [
-    window.phantom && window.phantom.solana,
-    window.solflare,
-    window.backpack,
-    window.solana,
-  ].find(provider => provider && provider.signTransaction);
+    ["Phantom", window.phantom && window.phantom.solana],
+    ["Solflare", window.solflare],
+    ["Backpack", window.backpack],
+  ].filter(([, provider]) => provider && provider.signTransaction);
 }
 
-async function connectWallet() {
-  const provider = findWallet();
+async function connectWallet(provider) {
+  provider = provider || (installedWallets()[0] || [])[1] || (window.solana && window.solana.signTransaction ? window.solana : null);
   if (!provider) throw new Error("No Solana wallet found in this browser. Install Phantom or Solflare and switch it to devnet.");
   const response = await provider.connect();
   const publicKey = new PublicKey((response && response.publicKey) || provider.publicKey);
@@ -645,6 +724,7 @@ async function connectWallet() {
     publicKey,
     isWallet: true,
     signTransaction: tx => provider.signTransaction(tx),
+    disconnect: () => provider.disconnect && provider.disconnect(),
   };
 }
 
@@ -677,18 +757,24 @@ async function renderRealApp() {
   const root = $("realApp");
   if (!app.wallet) {
     const error = el("div", { class: "error", role: "alert" });
-    root.replaceChildren(
-      el("p", null, "Switch your wallet to devnet, then connect."),
-      el("div", { class: "actions" }, el("button", { class: "btn", onclick: async () => {
-        try {
-          app.wallet = await connectWallet();
-          await renderRealApp();
-        } catch (e) {
-          error.textContent = friendlyError(e);
-        }
-      } }, "Connect wallet")),
+    const found = installedWallets();
+    const connect = provider => async () => {
+      error.textContent = "";
+      try {
+        app.wallet = await connectWallet(provider);
+        await renderRealApp();
+      } catch (e) {
+        error.textContent = friendlyError(e);
+      }
+    };
+    fill(root,
+      el("p", null, found.length ? "Switch your wallet to devnet, then connect." : "No Solana wallet found in this browser."),
+      el("div", { class: "wallet-list" }, found.length
+        ? found.map(([name, provider]) => el("button", { class: "btn", onclick: connect(provider) }, `Connect ${name}`))
+        : [el("a", { class: "btn quiet", href: "https://phantom.com", target: "_blank", rel: "noopener" }, "Get Phantom ↗"),
+           el("a", { class: "btn quiet", href: "https://solflare.com", target: "_blank", rel: "noopener" }, "Get Solflare ↗")]),
       error,
-      el("p", { class: "note" }, "Phantom, Solflare or Backpack. ", el("a", { href: "https://faucet.solana.com", target: "_blank", rel: "noopener" }, "Get test SOL ↗")));
+      el("p", { class: "note" }, "You'll need devnet SOL to send. ", el("a", { href: "https://faucet.solana.com", target: "_blank", rel: "noopener" }, "Get test SOL ↗")));
     return;
   }
 
@@ -757,8 +843,14 @@ async function renderRealApp() {
   const sent = sentPayments().filter(item => item.sender === app.wallet.publicKey.toString());
   fill(root,
     el("div", { class: "pending-item", style: "border-top:0;padding-top:0" },
-      el("span", null, "Connected ", el("span", { class: "mono" }, short(app.wallet.publicKey))),
-      el("span", null, `${sol(app.balance)} SOL on devnet`)),
+      el("span", null, dot(app.wallet.publicKey), "Connected ", el("span", { class: "mono" }, short(app.wallet.publicKey))),
+      el("span", null, `${sol(app.balance)} SOL on devnet `,
+        el("button", { class: "btn quiet small", onclick: async () => {
+          try { await app.wallet.disconnect(); } catch {}
+          app.wallet = null;
+          app.result = null;
+          renderRealApp();
+        } }, "Disconnect"))),
     app.balance < 10000 && el("p", { class: "note" }, "This wallet has no devnet SOL. ", el("a", { href: "https://faucet.solana.com", target: "_blank", rel: "noopener" }, "Get test SOL ↗")),
     resultBox(),
     el("label", { class: "field" }, el("span", null, "To"), recipient),
@@ -822,7 +914,8 @@ async function renderClaimPage(paymentText, secretText) {
   const paymentKey = new PublicKey(paymentText);
   const secret = fromLinkSecret(secretText);
   const body = el("div", { class: "scene" });
-  $("page").replaceChildren(body);
+  $("tabs").replaceChildren();
+  $("page").replaceChildren(body, el("p", { class: "note", style: "text-align:center" }, el("a", { href: "./" }, "What is SendGuard?")));
   body.append(el("p", { class: "say" }, "Checking this payment on devnet…"));
 
   const state = await readPayment(paymentKey).catch(() => null);
@@ -833,15 +926,25 @@ async function renderClaimPage(paymentText, secretText) {
 
   const expired = state.deadline < now();
   const error = el("div", { class: "error", role: "alert" });
+  const countdown = el("span");
   const details = [
-    el("div", { class: "label" }, "Someone sent you a payment"),
-    el("h3", null, `${sol(state.lamports)} test SOL`),
+    el("div", { class: "label" }, "Payment waiting for you"),
+    el("div", { class: "big" }, `${sol(state.lamports)} SOL`),
     el("p", { class: "say" }, expired
       ? "The hold has ended, so this can only go back to the sender now."
-      : `Claim it with the wallet it was sent to, before ${new Date(state.deadline * 1000).toLocaleString()}.`),
-    el("div", { class: "compare-addr" }, el("span", null, "From"), state.sender.toString()),
-    el("div", { class: "compare-addr" }, el("span", null, "For"), state.recipient.toString()),
+      : ["Claim it with the wallet it was sent to. ", countdown]),
+    el("div", { class: "kv" },
+      el("span", null, dot(state.sender), "From"), el("code", null, state.sender.toString()),
+      el("span", null, dot(state.recipient), "For"), el("code", null, state.recipient.toString())),
   ];
+  const tickClaim = () => {
+    const left = state.deadline - now();
+    countdown.textContent = left > 0 ? `${duration(left)} left.` : "The hold has just ended, so it can only go back to the sender.";
+  };
+  if (!expired) {
+    tickClaim();
+    setInterval(tickClaim, 1000);
+  }
 
   const claimWith = async (signer, button, options) => {
     button.disabled = true;
@@ -853,7 +956,7 @@ async function renderClaimPage(paymentText, secretText) {
       if (!result.ok) throw new Error(reasonFrom(result.logs) || "The claim was rejected.");
       body.replaceChildren(
         el("h3", null, "Claimed"),
-        el("p", { class: "say" }, `${sol(state.lamports)} test SOL is in your wallet.`),
+        el("p", { class: "say" }, `${sol(state.lamports)} SOL is in your wallet.`),
         el("div", { class: "actions" }, el("a", { class: "btn", href: explorer("tx", result.signature), target: "_blank", rel: "noopener" }, "View transaction ↗")));
     } catch (e) {
       error.textContent = friendlyError(e);
@@ -884,7 +987,6 @@ const API = cfg.api || (["localhost", "127.0.0.1"].includes(location.hostname) ?
 
 function renderChecker() {
   if (!API) return;
-  $("checker").hidden = false;
   const input = el("input", { class: "addr-input", placeholder: "Solana address", autocomplete: "off", spellcheck: "false" });
   const button = el("button", { class: "btn" }, "Check");
   const out = el("div");
@@ -933,6 +1035,18 @@ function renderChecker() {
   fill($("checkerApp"), el("label", { class: "field", style: "margin-top:0" }, el("span", null, "Wallet address"), input), el("div", { class: "actions" }, button), out);
 }
 
+const VIEWS = [["demo", "Demo"], ["check", "Check a wallet"], ["send", "Send"], ["how", "How it works"]];
+
+function showView(name) {
+  const views = VIEWS.filter(([id]) => id !== "check" || API);
+  if (!views.some(([id]) => id === name)) name = "demo";
+  for (const section of document.querySelectorAll("[data-view]")) section.hidden = section.dataset.view !== name;
+  fill($("tabs"), views.map(([id, label]) =>
+    el("button", { class: "tab", role: "tab", "aria-selected": String(id === name), onclick: () => showView(id) }, label)));
+  history.replaceState(null, "", `#/${name}`);
+  window.scrollTo(0, 0);
+}
+
 function start() {
   const params = new URLSearchParams(location.hash.slice(1));
   if (params.get("claim") && params.get("s")) {
@@ -946,6 +1060,7 @@ function start() {
     el("small", null, "These are two different addresses. Wallets usually show only the ends, 8E1W…mtna, so they look identical."),
     el("div", null, friend.publicKey.toString()),
     el("div", null, highlightDifferences(scammer.publicKey, friend.publicKey)));
+  showView(location.hash.replace(/^#\/?/, ""));
   renderChecker();
   render();
   setInterval(tick, 1000);

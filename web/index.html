@@ -8,7 +8,16 @@
 <meta name="description" content="Hold a Solana payment until the recipient proves it's them. Running on devnet.">
 <style>
 :root {
-  color-scheme: light;
+  color-scheme: light dark;
+  --link: #1f4fd8;
+  --field: #c9c8c3;
+  --row: #eeede9;
+  --chip: #f1f1ee;
+  --body: #3d3f45;
+  --amber-line: #eedcae;
+  --red-line: #f2cbc6;
+  --green-line: #bfe3cf;
+  --ring: #b9caf7;
   --bg: #f6f6f4;
   --panel: #ffffff;
   --ink: #16171a;
@@ -29,20 +38,49 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); }
 h1, h2, h3, p { margin: 0; }
-a { color: var(--blue); }
+a { color: var(--link); }
 button { font: inherit; cursor: pointer; }
 :focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .wrap { max-width: 1180px; margin: 0 auto; padding: 0 16px; }
 .mono { font-family: var(--mono); }
-.topbar { background: var(--panel); border-bottom: 1px solid var(--line); }
-nav { display: flex; justify-content: space-between; align-items: center; height: 52px; gap: 12px; }
+.topbar { background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 10; }
+nav { display: flex; align-items: center; height: 52px; gap: 20px; }
 .logo { font-weight: 650; font-size: 15px; }
-.live { font-size: 13px; color: var(--muted); }
+.live { font-size: 13px; color: var(--muted); margin-left: auto; white-space: nowrap; }
+.logo { text-decoration: none; color: var(--ink); }
+.tabs { display: flex; gap: 2px; align-self: stretch; overflow-x: auto; }
+.tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 0 10px; color: var(--muted); font-weight: 500; white-space: nowrap; }
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); }
+.net { font-size: 11px; font-weight: 600; color: var(--amber); background: var(--amber-soft); border: 1px solid var(--amber-line); border-radius: 4px; padding: 1px 6px; }
+[data-view] { padding-top: 24px; }
+.lead { color: var(--body); margin-top: 6px; font-size: 15px; max-width: 720px; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: baseline; }
+.copy { background: none; border: 0; padding: 0; font: 12px var(--mono); color: var(--muted); }
+.copy:hover { color: var(--ink); }
+.w-links { display: flex; gap: 8px; align-items: baseline; }
+.delta { font-size: 12px; font-weight: 600; margin-left: 6px; animation: fade 4s forwards; }
+.delta.up { color: var(--green); }
+.delta.down { color: var(--red); }
+@keyframes fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+tr.new td { animation: rowin 2.5s; }
+@keyframes rowin { from { background: var(--blue-soft); } }
+.steps { list-style: none; padding: 0; margin: 10px 0 0; font-size: 13px; }
+.steps li { display: flex; gap: 8px; padding: 2px 0; color: var(--faint); }
+.steps li.done { color: var(--ink); }
+.steps li.now { color: var(--ink); font-weight: 600; }
+.steps i { font-style: normal; width: 14px; color: var(--green); }
+.big { font-size: 30px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.01em; margin-top: 2px; }
+.kv { display: grid; grid-template-columns: 64px 1fr; gap: 4px 8px; margin-top: 12px; font-size: 13px; }
+.kv span { color: var(--muted); }
+.kv code { font: 12px/1.5 var(--mono); overflow-wrap: anywhere; }
+.wallet-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) { .delta, tr.new td { animation: none; } .bar i { transition: none; } }
 .pulse { display: none; }
 
 .intro { padding: 28px 0 20px; max-width: 720px; }
 h1 { font-size: 24px; line-height: 1.25; font-weight: 650; letter-spacing: -.01em; }
-.intro p { color: #3d3f45; margin-top: 8px; font-size: 15px; }
+.intro p { color: var(--body); margin-top: 8px; font-size: 15px; }
 .twins { margin-top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; font: 12.5px/1.7 var(--mono); overflow-wrap: anywhere; }
 .twins small { display: block; font: 13px var(--sans); color: var(--muted); margin-bottom: 4px; }
 .twins b { color: var(--red); font-weight: 500; }
@@ -53,6 +91,7 @@ h2 { font-size: 16px; font-weight: 650; }
 .guide { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; margin-bottom: 12px; }
 .guide { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; font-size: 13px; }
 .guide b { font-weight: 600; }
+.guide button { margin-left: 8px; }
 .guide span { color: var(--muted); white-space: nowrap; }
 
 .wallets { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 12px; align-items: start; }
@@ -68,44 +107,51 @@ h2 { font-size: 16px; font-weight: 650; }
 .empty { color: var(--faint); font-size: 13px; }
 .field { display: block; margin-top: 8px; }
 .field span { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
-.field input, .field select { width: 100%; background: #fff; color: var(--ink); border: 1px solid #c9c8c3; border-radius: 5px; padding: 8px; font: 14px var(--sans); min-height: 38px; }
+.field input, .field select { width: 100%; background: var(--panel); color: var(--ink); border: 1px solid var(--field); border-radius: 5px; padding: 8px; font: 14px var(--sans); min-height: 38px; }
 .field input.addr-input { font: 12.5px var(--mono); }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .btn { border: 1px solid transparent; border-radius: 5px; padding: 8px 12px; font-weight: 550; background: var(--blue); color: #fff; min-height: 38px; }
-.btn.quiet { background: #fff; color: var(--ink); border-color: #c9c8c3; }
+.btn.quiet { background: var(--panel); color: var(--ink); border-color: var(--field); }
 .btn.small { min-height: 30px; padding: 3px 9px; font-size: 13px; }
 .btn:hover:not(:disabled) { filter: brightness(.94); }
 .btn:disabled { opacity: .5; cursor: default; }
-.btn.next { box-shadow: 0 0 0 3px #b9caf7; }
+.btn.next { box-shadow: 0 0 0 3px var(--ring); }
 a.btn { text-decoration: none; display: inline-flex; align-items: center; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
-.item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid #eeede9; font-size: 13px; }
+.item { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--row); font-size: 13px; }
 .item:first-of-type { border-top: 0; }
 .item > div { min-width: 0; }
 .item small { display: block; color: var(--muted); font-size: 12px; }
 .card { border: 1px solid var(--line); border-radius: 5px; padding: 9px 10px; margin-top: 8px; font-size: 13px; }
-.card.hold { background: var(--amber-soft); border-color: #eedcae; }
-.card.bad { background: var(--red-soft); border-color: #f2cbc6; color: var(--red); }
-.card.good { background: var(--green-soft); border-color: #bfe3cf; color: var(--green); }
+.card.hold { background: var(--amber-soft); border-color: var(--amber-line); }
+.card.bad { background: var(--red-soft); border-color: var(--red-line); color: var(--red); }
+.card.good { background: var(--green-soft); border-color: var(--green-line); color: var(--green); }
 .card strong { display: block; }
 .timer { font-variant-numeric: tabular-nums; font-weight: 600; }
-.bar { height: 4px; background: #eedcae; border-radius: 2px; margin: 6px 0; overflow: hidden; }
+.bar { height: 4px; background: var(--amber-line); border-radius: 2px; margin: 6px 0; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--amber); transition: width 1s linear; }
 .item a { font-size: 12px; color: var(--muted); }
-.msg { background: #f1f1ee; border-radius: 6px; padding: 8px 10px; margin-top: 6px; font-size: 13px; }
+.msg { background: var(--chip); border-radius: 6px; padding: 8px 10px; margin-top: 6px; font-size: 13px; }
 .msg code { display: block; font: 11.5px/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; margin-top: 3px; }
-.alert { margin-top: 8px; border-radius: 5px; padding: 9px 10px; background: var(--red-soft); border: 1px solid #f2cbc6; font-size: 13px; }
+.alert { margin-top: 8px; border-radius: 5px; padding: 9px 10px; background: var(--red-soft); border: 1px solid var(--red-line); font-size: 13px; }
 .alert strong { color: var(--red); }
 .compare-addr { margin-top: 4px; font: 11.5px/1.5 var(--mono); overflow-wrap: anywhere; }
 .compare-addr span { color: var(--muted); display: inline-block; width: 46px; font: 12px var(--sans); }
 .compare-addr b { color: var(--red); font-weight: 500; }
+.seg { display: flex; align-items: center; gap: 0; font-size: 13px; }
+.seg span { color: var(--muted); margin-right: 8px; }
+.seg button { background: var(--panel); color: var(--muted); border: 1px solid var(--field); padding: 3px 12px; min-height: 30px; }
+.seg button:first-of-type { border-radius: 5px 0 0 5px; }
+.seg button:last-of-type { border-radius: 0 5px 5px 0; border-left: 0; }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); font-weight: 550; }
+.card a { color: inherit; }
 .error { margin-top: 6px; color: var(--red); font-size: 13px; }
 .error:empty { display: none; }
 
 .txs { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; margin-top: 12px; overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
 th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-td { padding: 7px 12px; border-top: 1px solid #eeede9; vertical-align: top; }
+td { padding: 7px 12px; border-top: 1px solid var(--row); vertical-align: top; }
 tr:first-child td { border-top: 0; }
 td.sig { font: 12px var(--mono); white-space: nowrap; }
 .ok { color: var(--green); }
@@ -113,22 +159,35 @@ td.sig { font: 12px var(--mono); white-space: nowrap; }
 
 .block { margin-top: 32px; }
 .form { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 14px; max-width: 620px; }
-.good-box { margin-top: 8px; border-radius: 5px; padding: 9px 10px; background: var(--green-soft); border: 1px solid #bfe3cf; font-size: 13px; }
+.good-box { margin-top: 8px; border-radius: 5px; padding: 9px 10px; background: var(--green-soft); border: 1px solid var(--green-line); font-size: 13px; }
 .good-box strong { color: var(--green); }
-.link-box { font: 11.5px/1.45 var(--mono); background: #fff; border: 1px solid var(--line); padding: 8px; border-radius: 5px; margin-top: 6px; overflow-wrap: anywhere; }
-.pending-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid #eeede9; flex-wrap: wrap; font-size: 13px; }
+.link-box { font: 11.5px/1.45 var(--mono); background: var(--panel); border: 1px solid var(--line); padding: 8px; border-radius: 5px; margin-top: 6px; overflow-wrap: anywhere; }
+.pending-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--row); flex-wrap: wrap; font-size: 13px; }
 .note { color: var(--muted); font-size: 13px; margin-top: 8px; }
 .label { font-size: 12px; font-weight: 600; color: var(--muted); }
 .rules { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; max-width: 620px; overflow-x: auto; }
-.limits { color: #3d3f45; margin: 0; padding-left: 18px; max-width: 720px; }
+.limits { color: var(--body); margin: 0; padding-left: 18px; max-width: 720px; }
 .limits li { margin: 3px 0; }
-footer { margin-top: 32px; padding: 16px 0 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+footer { margin-top: 40px; padding: 16px 0 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; display: flex; gap: 16px; flex-wrap: wrap; }
+footer a { color: var(--muted); }
 
 .scene { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 16px; max-width: 620px; margin: 24px auto; }
 .scene h3 { font-size: 20px; font-weight: 650; margin-top: 4px; }
-.scene .say { color: #3d3f45; margin-top: 6px; }
+.scene .say { color: var(--body); margin-top: 6px; }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111214; --panel: #1a1b1e; --ink: #ececee; --muted: #a0a2a8; --faint: #74767c; --line: #2c2d31;
+    --blue: #3d6be6; --blue-soft: #1a2440; --link: #8eaaf5;
+    --red: #f08a7e; --red-soft: #2e1815; --green: #5fc892; --green-soft: #14261c; --amber-soft: #2a2110; --amber: #e0b25a;
+    --field: #3a3b40; --row: #26272b; --chip: #232428; --body: #c9cacf;
+    --amber-line: #4a3a17; --red-line: #57261f; --green-line: #1f4a33; --ring: #2c4079;
+  }
+}
 @media (max-width: 900px) {
+  .btn { min-height: 44px; }
+  .btn.small { min-height: 36px; }
+  .live { display: none; }
   .wallets { grid-template-columns: 1fr; }
   .guide { flex-direction: column; gap: 2px; }
 }
@@ -137,65 +196,63 @@ footer { margin-top: 32px; padding: 16px 0 40px; border-top: 1px solid var(--lin
 <body>
 <div class="topbar"><div class="wrap">
   <nav>
-    <div class="logo">SendGuard</div>
-    <a class="live" id="programLink" target="_blank" rel="noopener">Solana devnet program ↗</a>
+    <a class="logo" href="./">SendGuard</a>
+    <span class="net">devnet</span>
+    <div class="tabs" id="tabs" role="tablist"></div>
+    <a class="live" id="programLink" target="_blank" rel="noopener">Program ↗</a>
   </nav>
 </div></div>
 <div class="wrap" id="page">
-  <header class="intro">
+  <section data-view="demo">
     <h1>Hold a payment until the recipient proves it's them</h1>
-    <p>Address poisoning is when a scammer sends you a tiny payment from an address that looks like one you've used, so it shows up in your wallet history. Copy it by mistake and the money is gone. One person <a href="https://cointelegraph.com/news/address-poisoning-copy-paste-mistake-50m-usdt-loss?rand=50490" target="_blank" rel="noopener">lost nearly $50M</a> this way in December 2025, and a Solana user <a href="https://pineanalytics.substack.com/p/solana-account-dusting-and-address" target="_blank" rel="noopener">lost $2.91M</a> in November 2024.</p>
-    <p>SendGuard holds the first payment to an address on-chain. To claim it, the recipient needs the right wallet and a secret link from you. If nobody claims it in time, it goes back to you.</p>
-    <div class="twins" id="twins"></div>
-  </header>
-
-  <section class="block" id="checker" hidden style="margin-top:0;margin-bottom:28px">
-    <div class="section-head"><h2>Is your wallet being targeted?</h2></div>
-    <p class="note" style="margin:-6px 0 10px">Paste any Solana address. This reads its recent public history and looks for addresses that imitate ones it has paid. It never asks you to connect or sign.</p>
-    <div class="form" id="checkerApp" style="max-width:none"></div>
-  </section>
-
-  <section>
-    <div class="section-head">
-      <h2>Try it: three wallets on devnet</h2>
-      <span class="note" style="margin:0">Test SOL only. Every action below is a real transaction.</span>
-    </div>
-    <div class="guide" id="guide"></div>
+    <p class="lead">Scammers plant lookalike addresses in your wallet history. Copy one by mistake and the money is gone. Make that mistake here with three test wallets, first with a normal transfer and then with SendGuard.</p>
+    <div class="twins" id="twins" style="max-width:720px"></div>
+    <div class="guide" id="guide" style="margin-top:20px"></div>
     <div id="startBox"></div>
     <div class="wallets" id="wallets" hidden></div>
     <div class="txs" id="txs" hidden></div>
   </section>
 
-  <section class="block">
-    <div class="section-head"><h2>What a claim needs</h2></div>
-    <div class="rules">
-      <table>
-        <thead><tr><th>Who claims</th><th>Right wallet</th><th>Has the secret</th><th>Result</th></tr></thead>
-        <tbody>
-          <tr><td>Your friend</td><td>Yes</td><td>Yes</td><td class="ok">Paid</td></tr>
-          <tr><td>Scammer at the lookalike address</td><td>Yes</td><td>No</td><td class="fail">Rejected</td></tr>
-          <tr><td>Someone who stole the link</td><td>No</td><td>Yes</td><td class="fail">Rejected</td></tr>
-        </tbody>
-      </table>
+  <section data-view="check" hidden>
+    <h1>Is your wallet being targeted?</h1>
+    <p class="lead">Paste any Solana address. This reads its recent public history and looks for addresses that imitate ones it has paid. It never asks you to connect or sign.</p>
+    <div class="form" id="checkerApp" style="margin-top:16px;max-width:820px"></div>
+  </section>
+
+  <section data-view="send" hidden>
+    <h1>Send with your own wallet</h1>
+    <p class="lead">Send test SOL to any address on devnet. It's held until the recipient claims it with the link you share, and it comes back to you if they don't.</p>
+    <div class="form" id="realApp" style="margin-top:16px"></div>
+  </section>
+
+  <section data-view="how" hidden>
+    <h1>How it works</h1>
+    <p class="lead">Address poisoning is when a scammer sends you a tiny payment from an address that looks like one you've used, so it shows up in your wallet history. One person <a href="https://cointelegraph.com/news/address-poisoning-copy-paste-mistake-50m-usdt-loss?rand=50490" target="_blank" rel="noopener">lost nearly $50M</a> this way in December 2025, and a Solana user <a href="https://pineanalytics.substack.com/p/solana-account-dusting-and-address" target="_blank" rel="noopener">lost $2.91M</a> in November 2024.</p>
+    <p class="lead">SendGuard holds the first payment to an address in a Solana program. To claim it, the recipient needs the right wallet and a secret link from you. If nobody claims it in time, it goes back to you. After one claim, that address is verified and later payments go straight through.</p>
+    <div class="block">
+      <div class="section-head"><h2>What a claim needs</h2></div>
+      <div class="rules">
+        <table>
+          <thead><tr><th>Who claims</th><th>Right wallet</th><th>Has the secret</th><th>Result</th></tr></thead>
+          <tbody>
+            <tr><td>Your friend</td><td>Yes</td><td>Yes</td><td class="ok">Paid</td></tr>
+            <tr><td>Scammer at the lookalike address</td><td>Yes</td><td>No</td><td class="fail">Rejected</td></tr>
+            <tr><td>Someone who stole the link</td><td>No</td><td>Yes</td><td class="fail">Rejected</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div class="block">
+      <div class="section-head"><h2>Known limits</h2></div>
+      <ul class="limits">
+        <li>If the scammer is the person you're talking to, you'd give them the secret.</li>
+        <li>Exchange deposit addresses can't claim, so they'd need a timed hold instead. That isn't built yet.</li>
+        <li>The lookalike warning is only a hint. The secret is what protects you.</li>
+        <li>This is an unaudited devnet prototype that handles SOL only. The demo wallets are public on purpose, and verified contacts are saved in this browser.</li>
+      </ul>
     </div>
   </section>
 
-  <section class="block" id="try">
-    <div class="section-head"><h2>Use your own wallet</h2></div>
-    <p class="note" style="margin:-6px 0 10px">Send test SOL to any address on devnet and share the link with someone.</p>
-    <div class="form" id="realApp"></div>
-  </section>
-
-  <section class="block">
-    <div class="section-head"><h2>Known limits</h2></div>
-    <ul class="limits">
-      <li>If the scammer is the person you're talking to, you'd give them the secret.</li>
-      <li>Exchange deposit addresses can't claim, so they'd need a timed hold instead. That isn't built yet.</li>
-      <li>The lookalike warning is only a hint. The secret is what protects you.</li>
-      <li>This is an unaudited devnet prototype that handles SOL only. The demo wallets are public on purpose, and verified contacts are saved in this browser.</li>
-    </ul>
-  </section>
-  <footer>SendGuard runs on Solana devnet with free test SOL.</footer>
 </div>
 <script src="vendor.js"></script>
 <script src="idl.js"></script>
